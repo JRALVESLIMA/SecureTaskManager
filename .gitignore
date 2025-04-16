@@ -1,0 +1,44 @@
+# Ignore o diretório bin/ e obj/ (gerados automaticamente pelo .NET)
+bin/
+obj/
+
+# Arquivos de configuração do Visual Studio
+.vs/
+.vscode/
+.idea/
+
+# Arquivos de configuração específicos de usuário
+# Windows
+Thumbs.db
+Desktop.ini
+# macOS
+.DS_Store
+
+# Arquivos de compilação do .NET
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+
+# Arquivos de logs
+*.log
+
+# Arquivos temporários
+*.tmp
+
+# Arquivos de publicação do .NET
+publish/
+
+# Arquivos de dependências do .NET
+.nuget/
+
+# Diretório de pacotes do NuGet
+packages/
+
+# Arquivos gerados ao usar o Azure DevOps
+.vsts/
+
+# Arquivos de backup do editor (gerados no VSCode)
+*.swp
+
+# Outros arquivos sensíveis, como o Secret do Identity
+secrets.json
