@@ -87,6 +87,31 @@ cd ../SecureTaskManager.Client
 dotnet run
 ```
 
+🌱 Seed do Usuário Administrador Master
+Para facilitar os testes administrativos, o projeto possui um perfil de execução especial que cria automaticamente um usuário com permissões de administrador, caso ele ainda não exista.
+
+👨‍💼 Execute o seed com:
+
+```bash
+dotnet run --launch-profile SeedMaster
+```
+
+Esse comando:
+
+- Cria um usuário com:
+
+   - Email: admin@master.com
+
+   - Senha: SenhaForte123@
+
+   - Role: Admin
+
+- É executado apenas se o usuário ainda não estiver presente no banco de dados.
+
+- Usa o ambiente Development.
+
+⚠️ Importante: Não execute esse comando em produção. Ele é destinado apenas para desenvolvimento e testes locais.
+
 
 ## 🧪 Testes
 
