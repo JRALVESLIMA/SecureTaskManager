@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+Ôªøusing Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using SecureTaskManager.API.DTOs;
 using SecureTaskManager.API.Services;
@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using SecureTaskManager.API.Models;
+using System.Security.Claims;
+
 
 namespace SecureTaskManager.API.Controllers
 {
@@ -26,19 +28,23 @@ namespace SecureTaskManager.API.Controllers
         [HttpPost("register")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
-            if (string.IsNullOrWhiteSpace(request.UserName) || string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+            if (string.IsNullOrWhiteSpace(request.UserName) ||
+                string.IsNullOrWhiteSpace(request.Email) ||
+                string.IsNullOrWhiteSpace(request.Password))
             {
-                return BadRequest("Nome de usu·rio, email e senha s„o obrigatÛrios.");
+                return BadRequest("Nome de usu√°rio, email e senha s√£o obrigat√≥rios.");
             }
 
-            var result = await _userService.RegisterAsync(request);
-
-            if (result == null)
-                return BadRequest("E-mail j· est· em uso.");
-
-            return Ok(result);
+            try
+            {
+                var result = await _userService.RegisterAsync(request);
+                return Ok(result);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(ex.Message);
+            }
         }
-
 
         // Endpoint de login
         [HttpPost("login")]
@@ -47,12 +53,12 @@ namespace SecureTaskManager.API.Controllers
             var result = await _userService.LoginAsync(request);
 
             if (result == null)
-                return Unauthorized("Credenciais inv·lidas.");
+                return Unauthorized("Credenciais inv√°lidas.");
 
             return Ok(result);
         }
 
-        // Endpoint protegido: Perfil do Usu·rio
+        // Endpoint exibi√ß√£o do Perfil do Usu√°rio
         [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
         [HttpGet("profile")]
         public async Task<ActionResult<UserDto>> GetProfile()
@@ -60,14 +66,14 @@ namespace SecureTaskManager.API.Controllers
             var userName = User.Identity?.Name;
 
             if (string.IsNullOrEmpty(userName))
-                return Unauthorized("Usu·rio n„o autenticado.");
+                return Unauthorized("Usu√°rio n√£o autenticado.");
 
             var user = await _userService.GetUserByUserNameAsync(userName);
 
             if (user == null)
-                return NotFound("Usu·rio n„o encontrado.");
+                return NotFound("Usu√°rio n√£o encontrado.");
 
-            // Usando o UserManager para obter as roles do usu·rio
+            // Usando o UserManager para obter as roles do usu√°rio
             var userRoles = await _userManager.GetRolesAsync(user);
 
             var userDto = new UserDto
@@ -76,52 +82,37 @@ namespace SecureTaskManager.API.Controllers
                 UserName = user.UserName,
                 FullName = user.FullName,
                 Email = user.Email,
-                Role = (await _userManager.GetRolesAsync(user))?.FirstOrDefault() ?? "Sem funÁ„o atribuÌda"
+                Role = userRoles?.FirstOrDefault() ?? "Sem fun√ß√£o atribu√≠da"
             };
 
             return Ok(userDto);
         }
 
-
-
-        // Endpoint protegido: listar todos os usu·rios (apenas Admin)
-        [Authorize(Roles = "Admin")]
+        // Endpoint de listar todos os usu√°rios
+        [Authorize(Roles = "Master,Admin")]
         [HttpGet("all")]
         public async Task<IActionResult> GetAllUsers()
         {
-            var users = await _userService.GetAllUsersAsync();
-            return Ok(users);
-        }
-
-        
-
-        // Endpoint para deletar um usu·rio
-        [Authorize(Roles = "Admin")]
-        [HttpPost("updateRole")]
-        public async Task<IActionResult> UpdateUserRole([FromBody] UpdateUserRoleRequest request)
-        {
-            // Verifica se os par‚metros s„o nulos
-            if (string.IsNullOrEmpty(request.UserName) || string.IsNullOrEmpty(request.Role))
+            try
             {
-                return BadRequest("Nome de usu·rio ou papel n„o podem ser nulos ou vazios.");
+                var users = await _userService.GetAllUsersAsync();
+                return Ok(users);
             }
+            catch (Exception ex)
+            {
 
-            // Verifica se o usu·rio foi alterado com sucesso
-            var result = await _userService.UpdateUserRoleAsync(request.UserName, request.Role);
-
-            if (!result)
-                return BadRequest("Falha ao atualizar o papel do usu·rio ou usu·rio n„o encontrado.");
-
-            return Ok(new { Message = "Papel do usu·rio atualizado com sucesso." });
+                return StatusCode(500, $"Erro ao buscar usu√°rios: {ex.Message}\n\n{ex.StackTrace}");
+            }
         }
 
-        [Authorize(Roles = "Admin")]
+        //Endpoint para atualiza√ß√£o de dados pelo Administrador.
+        [Authorize(Roles = "Master")]
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateUser([FromRoute] int id, [FromBody] UpdateUserRequest request)
+        public async Task<IActionResult> UpdateUser([FromRoute] string id, [FromBody] UpdateUserRequest request)
         {
             var user = await _userService.GetUserByIdAsync(id);
             if (user == null)
-                return NotFound("Usu·rio n„o encontrado.");
+                return NotFound("Usu√°rio n√£o encontrado.");
 
             user.UserName = request.UserName;
             user.FullName = request.FullName;
@@ -130,25 +121,26 @@ namespace SecureTaskManager.API.Controllers
             var result = await _userService.UpdateUserAsync(user);
 
             if (!result)
-                return BadRequest("Falha ao atualizar os dados do usu·rio.");
+                return BadRequest("Falha ao atualizar os dados do usu√°rio.");
 
-            return Ok(new { Message = "Dados do usu·rio atualizados com sucesso." });
+            return Ok(new { Message = "Dados do usu√°rio atualizados com sucesso." });
         }
 
-        [Authorize]
+        // Endpoint Atualiza√ß√£o de Perfil do usuario
+        [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
         [HttpPut("updateProfile")]
         public async Task<IActionResult> UpdateUserProfile([FromBody] UpdateUserRequest request)
         {
             if (User?.Identity?.Name is null)
-                return Unauthorized("N„o foi possÌvel identificar o usu·rio logado.");
+                return Unauthorized("N√£o foi poss√≠vel identificar o usu√°rio logado.");
 
-            // ObtÈm o usu·rio atual pelo UserName (do token JWT)
+            // Obt√©m o usu√°rio atual pelo UserName (do token JWT)
             var user = await _userService.GetUserByUserNameAsync(User.Identity.Name);
 
             if (user == null)
-                return NotFound("Usu·rio n„o encontrado.");
+                return NotFound("Usu√°rio n√£o encontrado.");
 
-            // Permite que o usu·rio altere seus prÛprios dados, exceto o ID
+            // Permite que o usu√°rio altere seus pr√≥prios dados, exceto o ID e Role
             user.UserName = request.UserName;
             user.FullName = request.FullName;
             user.Email = request.Email;
@@ -156,23 +148,23 @@ namespace SecureTaskManager.API.Controllers
             var result = await _userService.UpdateUserAsync(user);
 
             if (!result)
-                return BadRequest("Falha ao atualizar os dados do usu·rio.");
+                return BadRequest("Falha ao atualizar os dados do usu√°rio.");
 
             return Ok(new { Message = "Dados do perfil atualizados com sucesso." });
         }
 
-
-        [Authorize]
+        // Endpoint para atualiza√ß√£o de senha do usuario
+        [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
         [HttpPatch("changePassword")]
         public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordRequest request)
         {
             if (User?.Identity?.Name is null)
-                return Unauthorized("N„o foi possÌvel identificar o usu·rio logado.");
+                return Unauthorized("N√£o foi poss√≠vel identificar o usu√°rio logado.");
 
             var user = await _userService.GetUserByUserNameAsync(User.Identity.Name);
 
             if (user == null)
-                return NotFound("Usu·rio n„o encontrado.");
+                return NotFound("Usu√°rio n√£o encontrado.");
 
             var result = await _userService.ChangePasswordAsync(user, request.CurrentPassword, request.NewPassword);
 
@@ -182,22 +174,22 @@ namespace SecureTaskManager.API.Controllers
             return Ok(new { Message = "Senha alterada com sucesso." });
         }
 
-
-        [Authorize]
+        // Endponit para deletar a propria conta.
+        [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
         [HttpDelete("deleteAccount")]
         public async Task<IActionResult> DeleteOwnAccount()
         {
             var userName = User.Identity?.Name;
 
             if (string.IsNullOrEmpty(userName))
-                return Unauthorized("Usu·rio n„o autenticado.");
+                return Unauthorized("Usu√°rio n√£o autenticado.");
 
             var user = await _userService.GetUserByUserNameAsync(userName);
 
             if (user == null)
-                return NotFound("Usu·rio n„o encontrado.");
+                return NotFound("Usu√°rio n√£o encontrado.");
 
-            var result = await _userService.DeleteUserAsync(user);
+            var result = await _userService.DeleteUserAsync(user.Id);
 
             if (!result)
                 return BadRequest("Erro ao deletar a conta.");
@@ -205,7 +197,102 @@ namespace SecureTaskManager.API.Controllers
             return Ok(new { Message = "Conta deletada com sucesso." });
         }
 
+        //Endpoint de dele√ß√£o de usu√°rios pelos Administradores
+        [Authorize(Roles = "Master,Admin")]
+        [HttpDelete("delete/{userId}")]
+        public async Task<IActionResult> DeleteUser(string userId)
+        {
+            var currentUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (currentUserId == null)
+                return Unauthorized("Usu√°rio atual n√£o autenticado.");
 
+            var currentUser = await _userManager.FindByIdAsync(currentUserId);
+            if (currentUser == null)
+                return Unauthorized("Usu√°rio atual n√£o encontrado.");
+
+            var currentUserRoles = await _userManager.GetRolesAsync(currentUser);
+
+            var user = await _userManager.FindByIdAsync(userId);
+            if (user == null)
+                return NotFound("Usu√°rio n√£o encontrado.");
+
+            var targetUserRoles = await _userManager.GetRolesAsync(user);
+
+            // Impede excluir Master
+            if (targetUserRoles.Contains("Master"))
+                return Forbid("N√£o √© permitido excluir o usu√°rio Master.");
+
+            // Admin s√≥ pode excluir usu√°rios comuns (com role 'User')
+            if (currentUserRoles.Contains("Admin") && !targetUserRoles.Contains("User"))
+                return Forbid("Admin s√≥ pode excluir usu√°rios comuns.");
+
+            // Master pode excluir qualquer um (exceto ele mesmo se quiser limitar)
+            await _userService.DeleteUserAsync(userId);
+
+            return Ok("Usu√°rio exclu√≠do com sucesso.");
+        }
+
+
+        // Endponit de promo√ß√£o de Role.
+        [Authorize(Roles = "Master,Admin")]
+        [HttpPut("promote/{userId}")]
+        public async Task<IActionResult> PromoteUser([FromBody] PromoteUserRequest request)
+        {
+            var currentUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(currentUserId))
+                return Unauthorized("Usu√°rio atual n√£o autenticado.");
+
+            var currentUser = await _userManager.FindByIdAsync(currentUserId);
+            if (currentUser == null)
+                return Unauthorized("Usu√°rio atual n√£o encontrado.");
+
+            var currentUserRoles = await _userManager.GetRolesAsync(currentUser);
+
+            var allowedRoles = new[] { "Master", "Admin", "User" };
+            if (!allowedRoles.Contains(request.NewRole))
+                return BadRequest("Role inv√°lido. Use Master, Admin ou User.");
+
+            var user = await _userManager.FindByNameAsync(request.UserName);
+            if (user == null)
+                return NotFound("Usu√°rio n√£o encontrado.");
+
+            var userRoles = await _userManager.GetRolesAsync(user);
+            var isUserMaster = userRoles.Contains("Master");
+            var isUserAdmin = userRoles.Contains("Admin");
+            var isUserComum = userRoles.Contains("User");
+
+            // Protege o √∫ltimo Master de ser rebaixado
+            if (isUserMaster && request.NewRole != "Master")
+            {
+                var mastersCount = await _userService.CountUsersInRoleAsync("Master");
+                if (mastersCount <= 1)
+                    return Forbid("N√£o √© permitido rebaixar o √∫ltimo usu√°rio com role Master.");
+            }
+
+            // Regras espec√≠ficas se quem est√° promovendo for Admin
+            if (currentUserRoles.Contains("Admin"))
+            {
+                if (request.NewRole == "Master")
+                    return Forbid("Admin n√£o pode promover para Master.");
+
+                if (!isUserComum)
+                    return Forbid("Admin s√≥ pode promover usu√°rios do tipo User.");
+
+                if (request.NewRole != "Admin")
+                    return Forbid("Admin s√≥ pode promover usu√°rios para Admin.");
+            }
+
+            // Somente Master pode promover para Master
+            if (request.NewRole == "Master" && !currentUserRoles.Contains("Master"))
+            {
+                return Forbid("Somente usu√°rios Master podem promover outros para Master.");
+            }
+
+            await _userManager.RemoveFromRolesAsync(user, userRoles);
+            await _userManager.AddToRoleAsync(user, request.NewRole);
+
+            return Ok("Usu√°rio promovido/rebaixado com sucesso.");
+        }
 
     }
 }

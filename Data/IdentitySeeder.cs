@@ -1,29 +1,43 @@
-using Microsoft.AspNetCore.Identity;
+ï»¿using Microsoft.AspNetCore.Identity;
 using SecureTaskManager.API.Models;
 
 namespace SecureTaskManager.API.Data
 {
     public static class IdentitySeeder
     {
-        public static async Task SeedAdminUserAsync(ApplicationDbContext context)
+        public static async Task SeedRolesAndAdminUserAsync(UserManager<ApplicationUser> userManager, RoleManager<IdentityRole> roleManager)
         {
-            var email = "master@admin.com";
+            string[] roles = new[] { "Master", "Admin", "User" };
 
-            // Se o usuário já existe, não faz nada
-            if (context.Users.Any(u => u.Email == email)) return;
-
-            var master = new ApplicationUser
+            foreach (var role in roles)
             {
-                UserName = "adminmaster",
-                Email = email,
-                Role = "Admin"
-            };
+                if (!await roleManager.RoleExistsAsync(role))
+                {
+                    await roleManager.CreateAsync(new IdentityRole(role));
+                }
+            }
 
-            var passwordHasher = new PasswordHasher<ApplicationUser>();
-            master.PasswordHash = passwordHasher.HashPassword(master, "Admin123!"); // Senha forte e segura
+            var email = "master@admin.com";
+            var userName = "adminmaster";
 
-            context.Users.Add(master);
-            await context.SaveChangesAsync();
+            var user = await userManager.FindByEmailAsync(email);
+            if (user == null)
+            {
+                user = new ApplicationUser
+                {
+                    UserName = userName,
+                    Email = email,
+                    EmailConfirmed = true
+                };
+
+                var result = await userManager.CreateAsync(user, "Admin123!");
+                if (!result.Succeeded)
+                {
+                    throw new Exception("Falha ao criar usuÃ¡rio admin: " + string.Join(", ", result.Errors.Select(e => e.Description)));
+                }
+
+                await userManager.AddToRoleAsync(user, "Master");
+            }
         }
     }
 }

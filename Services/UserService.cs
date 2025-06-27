@@ -1,5 +1,6 @@
-using Microsoft.AspNetCore.Identity;
+Ôªøusing Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SecureTaskManager.API.Data;
 using SecureTaskManager.API.DTOs;
 using SecureTaskManager.API.Models;
@@ -9,23 +10,36 @@ namespace SecureTaskManager.API.Services
     public class UserService
     {
         private readonly ApplicationDbContext _context;
-        private readonly ApplicationDbContext _dbContext;
         private readonly TokenService _tokenService;
         private readonly PasswordHasher<ApplicationUser> _passwordHasher;
+        private readonly IConfiguration _configuration;
+        private readonly UserManager<ApplicationUser> _userManager;
 
-        public UserService(ApplicationDbContext context, TokenService tokenService, ApplicationDbContext dbContext)
+        public UserService(ApplicationDbContext context, TokenService tokenService, IConfiguration configuration, UserManager<ApplicationUser> userManager)
         {
             _context = context;
             _tokenService = tokenService;
-            _dbContext = dbContext;
             _passwordHasher = new PasswordHasher<ApplicationUser>();
+            _configuration = configuration;
+            _userManager = userManager;
         }
 
         public async Task<AuthResponse?> RegisterAsync(RegisterRequest request)
         {
-            // Verifica se o e-mail j· est· cadastrado
-            if (await _context.Users.AnyAsync(u => u.Email == request.Email))
-                return null;
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.Email) ||
+                string.IsNullOrWhiteSpace(request.Password) ||
+                string.IsNullOrWhiteSpace(request.UserName))
+            {
+                throw new Exception("Dados obrigat√≥rios ausentes.");
+            }
+
+            
+            var existingUser = await _userManager.FindByEmailAsync(request.Email);
+            if (existingUser != null)
+            {
+                throw new Exception("E-mail j√° est√° em uso.");
+            }
 
             var user = new ApplicationUser
             {
@@ -33,77 +47,108 @@ namespace SecureTaskManager.API.Services
                 Email = request.Email
             };
 
-            // Gera o hash da senha
-            user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
+            var result = await _userManager.CreateAsync(user, request.Password);
+            if (!result.Succeeded)
+            {
+                var errors = string.Join(", ", result.Errors.Select(e => e.Description));
+                throw new Exception($"Erro ao criar usu√°rio: {errors}");
+            }
 
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+            
+            await _userManager.AddToRoleAsync(user, "User");
 
-            var token = _tokenService.GenerateToken(user);
+            var token = await _tokenService.GenerateTokenAsync(user);
+            var roles = await _userManager.GetRolesAsync(user);
 
             return new AuthResponse
             {
                 UserName = user.UserName,
                 Token = token,
-                Role = user.Role
+                Role = roles.FirstOrDefault() ?? "User"
             };
         }
 
+
+
         public async Task<AuthResponse?> LoginAsync(LoginRequest request)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
-            if (user == null)
+            if (request == null || string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
                 return null;
 
-            var result = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
-            if (result == PasswordVerificationResult.Failed)
+            var user = await _userManager.FindByEmailAsync(request.Email);
+            if (user == null || string.IsNullOrEmpty(user.PasswordHash))
                 return null;
 
-            var token = _tokenService.GenerateToken(user);
+            var passwordValid = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash!, request.Password);
+            if (passwordValid == PasswordVerificationResult.Failed)
+                return null;
+
+            var token = await _tokenService.GenerateTokenAsync(user);
+
+            var roles = await _userManager.GetRolesAsync(user);
+            var role = roles.FirstOrDefault() ?? "User";
 
             return new AuthResponse
             {
-                UserName = user.UserName,
+                UserName = user.UserName ?? string.Empty,
                 Token = token,
-                Role = user.Role
+                Role = role
             };
         }
 
         public async Task<List<UserDto>> GetAllUsersAsync()
         {
-            var users = await _context.Users
-                .Select(u => new UserDto
-                {
-                    UserName = u.UserName,
-                    Role = u.Role
-                })
-                .ToListAsync();
+            var users = await _userManager.Users.ToListAsync();
+            var userDtos = new List<UserDto>();
 
-            return users;
+            foreach (var user in users)
+            {
+                var roles = await _userManager.GetRolesAsync(user);
+
+                userDtos.Add(new UserDto
+                {
+                    Id = user.Id,
+                    UserName = user.UserName,
+                    FullName = user.FullName,
+                    Email = user.Email,
+                    Role = roles.FirstOrDefault()!
+                });
+            }
+
+            return userDtos;
         }
+
+
 
         public async Task<bool> UpdateUserRoleAsync(string userName, string role)
         {
-            // Verifica se o usu·rio existe
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.UserName == userName);
-            if (user == null) return false;
+            var user = await _userManager.FindByNameAsync(userName);
+            if (user == null)
+                return false;
 
-            // Verifica se o papel fornecido È v·lido
-            if (role != "Admin" && role != "User") return false;
+            // Valida√ß√£o simples dos roles aceitos
+            var validRoles = new List<string> { "Admin", "User", "Master" };
+            if (!validRoles.Contains(role))
+                return false;
 
-            // Altera o papel do usu·rio
-            user.Role = role;
+            // Remove todos os roles atuais
+            var currentRoles = await _userManager.GetRolesAsync(user);
+            var removeResult = await _userManager.RemoveFromRolesAsync(user, currentRoles);
+            if (!removeResult.Succeeded)
+                return false;
 
-            _context.Users.Update(user);
-            var result = await _context.SaveChangesAsync();
+            // Adiciona o novo role
+            var addResult = await _userManager.AddToRoleAsync(user, role);
+            if (!addResult.Succeeded)
+                return false;
 
-            return result > 0;
+            return true;
         }
+
 
         public async Task<bool> DeleteUserAsync(string userName)
         {
             var user = await _context.Users.FirstOrDefaultAsync(u => u.UserName == userName);
-
             if (user == null)
                 return false;
 
@@ -112,57 +157,103 @@ namespace SecureTaskManager.API.Services
             return true;
         }
 
-        public async Task<ApplicationUser?> GetUserByIdAsync(int id)
+        public async Task<ApplicationUser?> GetUserByIdAsync(string id)
         {
-            // Busca o usu·rio pelo ID
-            var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.Id == id);
-            return user;
+            return await _context.Users.FirstOrDefaultAsync(u => u.Id == id);
         }
 
         public async Task<bool> UpdateUserAsync(ApplicationUser user)
         {
-            _dbContext.Users.Update(user); // Atualiza o usu·rio no contexto
-            var result = await _dbContext.SaveChangesAsync(); // Salva as alteraÁıes no banco
+            if (user == null)
+                return false;
 
-            return result > 0; // Retorna true se a atualizaÁ„o for bem-sucedida
+            _context.Users.Update(user);
+            var result = await _context.SaveChangesAsync();
+            return result > 0;
         }
 
         public async Task<ApplicationUser?> GetUserByUserNameAsync(string userName)
         {
-            // Busca o usu·rio pelo UserName
-            var user = await _dbContext.Users.FirstOrDefaultAsync(u => u.UserName == userName);
-            return user;
+            return await _context.Users.FirstOrDefaultAsync(u => u.UserName == userName);
         }
 
         public async Task<bool> ChangePasswordAsync(ApplicationUser user, string currentPassword, string newPassword)
         {
-            // Verifica se a senha atual est· correta
-            var passwordHasher = new PasswordHasher<ApplicationUser>();
-            var verificationResult = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword);
-
-            if (verificationResult == PasswordVerificationResult.Failed)
-            {
-                // Se a senha atual estiver incorreta, retorna false
+            if (user == null || user.PasswordHash == null)
                 return false;
-            }
 
-            // Se a senha atual for v·lida, atualiza a senha
-            user.PasswordHash = passwordHasher.HashPassword(user, newPassword);
+            var verificationResult = _passwordHasher.VerifyHashedPassword(user, user.PasswordHash, currentPassword);
+            if (verificationResult == PasswordVerificationResult.Failed)
+                return false;
 
-            // Salva as mudanÁas no banco de dados
-            _dbContext.Users.Update(user);
-            await _dbContext.SaveChangesAsync();
+            user.PasswordHash = _passwordHasher.HashPassword(user, newPassword);
+
+            _context.Users.Update(user);
+            await _context.SaveChangesAsync();
 
             return true;
         }
 
-
-        public async Task<bool> DeleteUserAsync(ApplicationUser user)
+        public async Task<bool> DeleteUserByInstanceAsync(ApplicationUser user)
         {
-            _dbContext.Users.Remove(user);
-            var result = await _dbContext.SaveChangesAsync();
+            if (user == null)
+                return false;
+
+            _context.Users.Remove(user);
+            var result = await _context.SaveChangesAsync();
             return result > 0;
         }
+
+        // M√©todo para criar usu√°rio master a partir das configura√ß√µes no appsettings.json
+        public async Task SeedMasterUserAsync(UserManager<ApplicationUser> userManager)
+        {
+            var masterUserName = _configuration["MasterUser:UserName"];
+            var masterEmail = _configuration["MasterUser:Email"];
+            var masterPassword = _configuration["MasterUser:Password"];
+
+            if (string.IsNullOrWhiteSpace(masterUserName))
+                throw new InvalidOperationException("Configura√ß√£o 'MasterUser:UserName' n√£o pode ser nula ou vazia.");
+
+            if (string.IsNullOrWhiteSpace(masterEmail))
+                throw new InvalidOperationException("Configura√ß√£o 'MasterUser:Email' n√£o pode ser nula ou vazia.");
+
+            if (string.IsNullOrWhiteSpace(masterPassword))
+                throw new InvalidOperationException("Configura√ß√£o 'MasterUser:Password' n√£o pode ser nula ou vazia.");
+
+            var masterUser = await userManager.FindByNameAsync(masterUserName);
+            if (masterUser == null)
+            {
+                var user = new ApplicationUser
+                {
+                    UserName = masterUserName,
+                    Email = masterEmail,
+                };
+
+                var result = await userManager.CreateAsync(user, masterPassword);
+                if (result.Succeeded)
+                {
+                    await userManager.AddToRoleAsync(user, "Master");
+                    Console.WriteLine("Usu√°rio master criado com sucesso com role Master!!");
+                }
+                else
+                {
+                    foreach (var error in result.Errors)
+                        Console.WriteLine($" - {error.Description}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("Usu√°rio master j√° existe.");
+            }
+        }
+
+
+        public async Task<int> CountUsersInRoleAsync(string role)
+        {
+            var usersInRole = await _userManager.GetUsersInRoleAsync(role);
+            return usersInRole.Count;
+        }
+
 
     }
 }

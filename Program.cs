@@ -1,102 +1,155 @@
+ï»¿using System.Security.Claims;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
-using SecureTaskManager.API.Data;
-using SecureTaskManager.API.Services;
+using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using SecureTaskManager.API.Data;
+using SecureTaskManager.API.Models;
+using SecureTaskManager.API.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configurações do banco de dados SQLite
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
+var app = BuildApp(builder, args);
+await app.RunAsync();
 
-// Serviços da aplicação
-builder.Services.AddScoped<TokenService>();
-builder.Services.AddScoped<UserService>();
-
-// Adiciona suporte a controllers
-builder.Services.AddControllers();
-
-// Configuração do Swagger
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen(options =>
+static WebApplication BuildApp(WebApplicationBuilder builder, string[] args)
 {
-    options.SwaggerDoc("v1", new OpenApiInfo { Title = "SecureTaskManager API", Version = "v1" });
+    // ConfiguraÃ§Ãµes do banco de dados SQLite
+    builder.Services.AddDbContext<ApplicationDbContext>(options =>
+        options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-    var jwtSecurityScheme = new OpenApiSecurityScheme
+    builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
+        .AddEntityFrameworkStores<ApplicationDbContext>()
+        .AddDefaultTokenProviders();
+
+    // ServiÃ§os da aplicaÃ§Ã£o
+    builder.Services.AddScoped<TokenService>();
+    builder.Services.AddScoped<UserService>();
+
+    builder.Services.AddControllers();
+
+    builder.Services.AddEndpointsApiExplorer();
+    builder.Services.AddSwaggerGen(options =>
     {
-        Scheme = "bearer",
-        BearerFormat = "JWT",
-        Name = "Authorization",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Description = "Insira o token JWT no campo abaixo. Exemplo: Bearer {seu_token}",
+        options.SwaggerDoc("v1", new OpenApiInfo { Title = "SecureTaskManager API", Version = "v1" });
 
-        Reference = new OpenApiReference
+        var jwtSecurityScheme = new OpenApiSecurityScheme
         {
-            Id = "Bearer",
-            Type = ReferenceType.SecurityScheme
-        }
-    };
+            Scheme = "bearer",
+            BearerFormat = "JWT",
+            Name = "Authorization",
+            In = ParameterLocation.Header,
+            Type = SecuritySchemeType.Http,
+            Description = "Insira o token JWT no campo abaixo. Exemplo: Bearer {seu_token}",
 
-    options.AddSecurityDefinition("Bearer", jwtSecurityScheme);
+            Reference = new OpenApiReference
+            {
+                Id = "Bearer",
+                Type = ReferenceType.SecurityScheme
+            }
+        };
 
-    options.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
+        options.AddSecurityDefinition("Bearer", jwtSecurityScheme);
+        options.AddSecurityRequirement(new OpenApiSecurityRequirement
         {
-            jwtSecurityScheme, Array.Empty<string>()
-        }
+            {
+                jwtSecurityScheme, Array.Empty<string>()
+            }
+        });
     });
-});
 
-// Configuração de autenticação JWT
-var secretKey = builder.Configuration["JwtSettings:SecretKey"];
-if (string.IsNullOrEmpty(secretKey))
-{
-    throw new InvalidOperationException("A chave secreta JWT não foi configurada corretamente.");
-}
+    var secretKey = builder.Configuration["JwtSettings:SecretKey"];
+    if (string.IsNullOrEmpty(secretKey))
+    {
+        throw new InvalidOperationException("A chave secreta JWT nÃ£o foi configurada corretamente.");
+    }
 
-builder.Services.AddAuthentication("Bearer")
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
     .AddJwtBearer(options =>
     {
-        options.Authority = builder.Configuration["JwtSettings:Issuer"]; // URL do servidor de emissão (se houver)
-        options.Audience = builder.Configuration["JwtSettings:Audience"]; // Público para o qual o JWT foi gerado
-        options.RequireHttpsMetadata = false; // Para testes locais, caso queira forçar HTTPS, mude isso para true
-        options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
+        var jwtSettings = builder.Configuration.GetSection("JwtSettings");
+        var secretKey = jwtSettings["SecretKey"] ?? throw new InvalidOperationException("JwtSettings:SecretKey estÃ¡ ausente no appsettings.json.");
+
+        options.RequireHttpsMetadata = false;
+        options.SaveToken = true;
+
+        options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
             ValidateAudience = true,
             ValidateLifetime = true,
-            ValidIssuer = builder.Configuration["JwtSettings:Issuer"],
-            ValidAudience = builder.Configuration["JwtSettings:Audience"],
-            IssuerSigningKey = new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(secretKey))
+            ValidateIssuerSigningKey = true,
+
+            ValidIssuer = jwtSettings["Issuer"],
+            ValidAudience = jwtSettings["Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+
+            RoleClaimType = ClaimTypes.Role, 
+            NameClaimType = ClaimTypes.Name  
+        };
+
+        // Eventos para debugging
+        options.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = context =>
+            {
+                Console.WriteLine($"Falha na autenticaÃ§Ã£o: {context.Exception.Message}");
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                var userName = context.Principal?.Identity?.Name ?? "usuÃ¡rio desconhecido";
+                Console.WriteLine($"Token validado para: {userName}");
+                return Task.CompletedTask;
+            },
+            OnMessageReceived = context =>
+            {
+                Console.WriteLine($"Token recebido: {context.Token}");
+                return Task.CompletedTask;
+            }
         };
     });
 
 
-var app = builder.Build();
+    var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
-{
-    var services = scope.ServiceProvider;
-    var context = services.GetRequiredService<ApplicationDbContext>();
-    await IdentitySeeder.SeedAdminUserAsync(context);
+    // ForÃ§a verificaÃ§Ã£o do argumento seed-master
+    if (args.Contains("seed-master"))
+    {
+        Console.WriteLine("Rodando o seed-master...");
+        using var scope = app.Services.CreateScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var userService = scope.ServiceProvider.GetRequiredService<UserService>();
+        userService.SeedMasterUserAsync(userManager).Wait(); 
+        Environment.Exit(0); 
+    }
+
+    using (var scope = app.Services.CreateScope())
+    {
+        var services = scope.ServiceProvider;
+        var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
+        var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
+
+        IdentitySeeder.SeedRolesAndAdminUserAsync(userManager, roleManager).Wait();
+    }
+
+
+    if (app.Environment.IsDevelopment())
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI();
+    }
+
+    app.UseHttpsRedirection();
+    app.UseAuthentication();
+    app.UseAuthorization();
+    app.MapControllers();
+
+    return app;
 }
-
-
-// Middleware do Swagger
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseHttpsRedirection();
-
-// Middleware de autenticação e autorização
-app.UseAuthentication(); // Agora o JWT está habilitado para autenticação
-app.UseAuthorization();
-
-// Mapeia os controllers (como UserController)
-app.MapControllers();
-
-app.Run();
