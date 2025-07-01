@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36127.28 d17.14
+VisualStudioVersion = 17.14.36221.1 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SecureTaskManager.API", "SecureTaskManager.API.csproj", "{4C084374-4F7E-D667-3B2D-30AE3F9102B9}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SecureTaskManager.API", "SecureTaskManager.API\SecureTaskManager.API.csproj", "{4C084374-4F7E-D667-3B2D-30AE3F9102B9}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -20,6 +20,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {A88B6958-7EBC-4C56-B33D-63A8DBA4B890}
+		SolutionGuid = {5F4C5176-F9CF-44F9-A221-A47DF321C05B}
 	EndGlobalSection
 EndGlobal

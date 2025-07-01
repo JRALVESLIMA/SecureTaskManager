@@ -116,7 +116,7 @@ static WebApplication BuildApp(WebApplicationBuilder builder, string[] args)
         };
     });
 
-
+   
     var app = builder.Build();
 
     // Força verificação do argumento seed-master
@@ -147,6 +147,7 @@ static WebApplication BuildApp(WebApplicationBuilder builder, string[] args)
     }
 
     app.UseHttpsRedirection();
+
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
