@@ -104,7 +104,7 @@ Esse comando:
 
    - Senha: SenhaForte123@
 
-   - Role: Admin
+   - Role: Master
 
 - É executado apenas se o usuário ainda não estiver presente no banco de dados.
 
